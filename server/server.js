@@ -1,33 +1,38 @@
 const express = require("express");
-const http = require("http");
-const app = express();
-const server = http.createServer(app);
-
-const io = require("socket.io")(server, {
-  cors: {
-    origin: "http://localhost:3000",
-    methods: ["GET", "POST"],
-  },
+const bodyParser = require("body-parser");
+const { Server } = require("socket.io");
+const io = new Server({
+  cors: true,
 });
+const app = express();
+
+app.use(bodyParser.json());
+
+const emailToSocketMapping = new Map();
+const socketToEmailMapping = new Map();
 
 io.on("connection", (socket) => {
-  socket.emit("me", socket.id);
-
-  socket.on("disconnect", () => {
-    socket.broadcast.emit("callEnded");
-  });
-
-  socket.on("callUser", (data) => {
-    io.to(data.userToCall).emit("callUser", {
-      signal: data.signalData,
-      from: data.from,
-      name: data.name,
+  console.log("new connection");
+  socket.on("join-room", (data) => {
+    const { roomId, emailId } = data;
+    console.log(`User with email: ${emailId} joined room: ${roomId}`);
+    emailToSocketMapping.set(emailId, socket.id);
+    socketToEmailMapping.set(socket.id, emailId);
+    socket.join(roomId);
+    socket.emit("joined-room", { roomId });
+    socket.broadcast.to(roomId).emit("user-joined", {
+      emailId,
     });
   });
 
-  socket.on("answerCall", (data) => {
-    io.to(data.to).emit("callAccepted", data.signal);
+  socket.on("call-user", (data) => {
+    const { emailId, offer } = data;
+    const fromEmail = socketToEmailMapping.get(socket.id);
+    const socketId = emailToSocketMapping.get(emailId);
+    socket.to(socketId).emit("incoming-call", { from: fromEmail, offer });
   });
 });
 
-server.listen(5000, () => console.log("server is running on port 5000"));
+app.listen(8000, () => console.log("Server is running at PORT: 8000"));
+
+io.listen(8001);
